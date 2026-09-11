@@ -1,0 +1,25 @@
+
+node_modules
+dist
+.env
+.env.*
+.DS_Store
+
+# 個人持股資料與備份不得提交（repo 與 Pages 網站都是公開的）
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.ods
+holdings_*
+private/
+screenshots/
+
+# Playwright reports and traces must stay out of source control.
+playwright-report/
+test-results/
+blob-report/
+screenshots/playwright-report/
+
+# 本機私密關鍵字清單（npm run privacy-check 使用）
+.privacy-denylist

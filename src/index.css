@@ -1,0 +1,8 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html{scroll-behavior:smooth}
+body{margin:0;background:#090b0f;color:#f4f7fb;font-family:"Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,sans-serif;}
+.mono{font-family:Consolas,"SFMono-Regular",monospace;}
