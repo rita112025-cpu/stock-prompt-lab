@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { DEFAULT_ACCOUNT, decodeCsv, defaultFactor, encodeCsv, parseHoldingsCsv, type ImportedHolding } from './holdingsCsv';
+import { decodeCsv, defaultFactor, encodeCsv, parseHoldingsCsv, planImport, type ImportedHolding, type ImportMode } from './holdingsCsv';
 import { fillPrompt, localDate } from './promptUtils';
 
 type Settings = {
@@ -212,25 +212,37 @@ export default function AppV5(){
   const [holdings, setHoldings] = useState<Holding[]>(INITIAL_HOLDINGS);
   const importInput = useRef<HTMLInputElement>(null);
   const [importRows, setImportRows] = useState<ImportedHolding[] | null>(null);
+  const [importAccount, setImportAccount] = useState('');
   const [importError, setImportError] = useState('');
   const [importBusy, setImportBusy] = useState(false);
+  const accountNames = useMemo(() => Array.from(new Set(holdings.map(h => h.account))), [holdings]);
+  const importNeedsAccount = !!importRows?.some(r => !r.account);
+  const importPlans = useMemo(() => {
+    if (!importRows) return null;
+    const resolved = importRows.map(r => r.account ? r : { ...r, account: importAccount.trim() });
+    return { add: planImport(holdings, resolved, 'add'), replace: planImport(holdings, resolved, 'replace') };
+  }, [holdings, importRows, importAccount]);
+
+  function closeImport() { setImportRows(null); setImportAccount(''); }
 
   async function importFile(file?: File) {
     if (!file) return;
-    setImportError(''); setImportRows(null); setImportBusy(true);
+    setImportError(''); closeImport(); setImportBusy(true);
     try {
       if (file.size > 5 * 1024 * 1024) throw new Error('檔案請小於 5 MB。');
-      setImportRows(parseHoldingsCsv(decodeCsv(await file.arrayBuffer()), accountFilter === '全部' ? DEFAULT_ACCOUNT : accountFilter));
+      // 缺少帳戶欄時留空，由預覽要求使用者明確指定，不依目前篩選暗自帶入。
+      setImportRows(parseHoldingsCsv(decodeCsv(await file.arrayBuffer()), ''));
     } catch (error) { setImportError(error instanceof Error ? error.message : '無法讀取 CSV。'); }
     finally { setImportBusy(false); }
   }
 
-  function applyImport(replace: boolean) {
-    if (!importRows) return;
-    const added = importRows.map(h => ({ ...h, id: crypto.randomUUID() }));
-    setHoldings(previous => replace ? added : [...previous, ...added]);
-    setAccountFilter('全部'); setTab('portfolio'); setImportRows(null);
-    showToast(`已匯入 ${added.length} 筆持股`);
+  function applyImport(mode: ImportMode) {
+    const plan = importPlans?.[mode];
+    if (!plan || plan.errors.length) return;
+    const added = plan.added.map(h => ({ ...h, id: crypto.randomUUID() }));
+    setHoldings([...plan.kept, ...added]);
+    setAccountFilter('全部'); setTab('portfolio'); closeImport();
+    showToast(mode === 'replace' ? `已更新 ${plan.accounts.join('、')}，共 ${added.length} 筆持股` : `已加入 ${added.length} 筆持股`);
   }
   const [activeCat, setActiveCat] = useState("全部");
   const [search, setSearch] = useState("");
@@ -440,14 +452,25 @@ export default function AppV5(){
       <main className="max-w-[1360px] mx-auto px-[24px] max-[560px]:px-[16px] py-[20px] flex flex-col gap-[20px]">
         <input ref={importInput} type="file" accept=".csv,text/csv" aria-label="選擇持股 CSV" className="hidden" onChange={e=>{ void importFile(e.target.files?.[0]); e.target.value = ''; }} />
         {importError && <div role="alert" className="rounded-[12px] border border-red-400 p-4 text-red-300">匯入失敗：{importError} 原持股未變更。</div>}
-        {importRows && <section aria-label="持股匯入預覽" className="rounded-[18px] border border-[#f7b731] bg-[#131a23] p-6 space-y-3">
+        {importRows && importPlans && <section aria-label="持股匯入預覽" className="rounded-[18px] border border-[#f7b731] bg-[#131a23] p-6 space-y-3">
           <h2 className="text-xl font-bold">匯入預覽：{importRows.length} 筆持股</h2>
-          <p>加入會保留原持股（重複項目也會加入）；取代會替換所有帳戶的持股。</p>
-          <div className="max-h-60 overflow-auto"><table className="w-full text-left"><thead><tr>{['代號','名稱','股數','成本均價','現價','帳戶','因子'].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{importRows.map((r,i)=><tr key={i}>{[r.code,r.name,r.shares,r.costAvg,r.price,r.account,r.factor].map((v,j)=><td key={j} className="p-2">{v}</td>)}</tr>)}</tbody></table></div>
+          <p>CSV 視為各帳戶目前的完整持股。取代：清空檔案中出現的帳戶再匯入，其他帳戶不受影響。加入：只能新增尚未存在的帳戶＋代號。</p>
+          {importNeedsAccount && <label className="flex flex-col gap-2 max-w-[520px]">
+            <span className="font-bold text-[#f7b731]">這個檔案沒有帳戶欄，請指定這些持股屬於哪個帳戶：</span>
+            <input value={importAccount} onChange={e=>setImportAccount(e.target.value)} list="import-accounts" aria-label="匯入帳戶" placeholder="輸入或選擇帳戶名稱" className="min-h-[40px] rounded-[11px] bg-[#0b0f15] border border-[#27303d] px-3 text-[18px] text-[#e6e9ef] outline-none focus:border-[#f7b731]/60 placeholder:text-[#4b5767]" />
+            <datalist id="import-accounts">{accountNames.map(a=><option key={a} value={a} />)}</datalist>
+          </label>}
+          <div className="max-h-60 overflow-auto"><table className="w-full text-left"><thead><tr>{['代號','名稱','股數','成本均價','現價','帳戶','因子'].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{importRows.map((r,i)=><tr key={i}>{[r.code,r.name,r.shares,r.costAvg,r.price,r.account || importAccount.trim() || '待指定',r.factor].map((v,j)=><td key={j} className="p-2">{v}</td>)}</tr>)}</tbody></table></div>
+          {importPlans.replace.notes.map(n=><p key={n} className="text-[#8fa0b7]">{n}</p>)}
+          {importPlans.replace.errors.map(e=><p key={e} className="text-red-300">無法匯入：{e}</p>)}
+          {!importPlans.replace.errors.length && importPlans.add.errors.map(e=><p key={e} className="text-[#fbbf24]">無法加入：{e}</p>)}
+          {!importPlans.replace.errors.length && <p className="text-[#8fa0b7]">按「取代檔案中的帳戶」會更新：{importPlans.replace.accounts.join('、')}；其他帳戶不變。</p>}
+          {!!importPlans.replace.dropped.length && <p className="text-[#fbbf24]">取代後會被移除（CSV 中沒有列出）：{importPlans.replace.dropped.map(h => `${h.account} ${h.code} ${h.name}（${formatNumber(h.shares)} 股）`).join('、')}</p>}
+          {!!importPlans.replace.factorChanges.length && <p className="text-[#fbbf24]">取代後因子會被 CSV 覆蓋，包含你在表格中手動修改的因子：{importPlans.replace.factorChanges.map(c => `${c.account} ${c.code}：${c.from} → ${c.to}`).join('、')}</p>}
           <div className="flex flex-wrap gap-3">
-            <button onClick={()=>applyImport(false)} className="min-h-[40px] px-4 rounded-xl bg-[#f7b731] text-black font-bold">加入現有持股</button>
-            <button onClick={()=>applyImport(true)} className="min-h-[40px] px-4 rounded-xl border border-[#f7b731]">取代全部持股</button>
-            <button onClick={()=>setImportRows(null)} className="min-h-[40px] px-4 rounded-xl border border-[#27303d]">取消</button>
+            <button disabled={!!importPlans.add.errors.length} onClick={()=>applyImport('add')} className="min-h-[40px] px-4 rounded-xl bg-[#f7b731] text-black font-bold disabled:opacity-40 disabled:cursor-not-allowed">加入現有持股</button>
+            <button disabled={!!importPlans.replace.errors.length} onClick={()=>applyImport('replace')} className="min-h-[40px] px-4 rounded-xl border border-[#f7b731] disabled:opacity-40 disabled:cursor-not-allowed">取代檔案中的帳戶</button>
+            <button onClick={closeImport} className="min-h-[40px] px-4 rounded-xl border border-[#27303d]">取消</button>
           </div>
         </section>}
         {/* Global settings */}
@@ -554,7 +577,7 @@ export default function AppV5(){
               </div>
             </div>
 
-            <p className="text-[16px] text-[#8fa0b7]">匯入 CSV 必填：代號、名稱、股數、成本均價、現價；帳戶、因子可省略（因子未填時 00 開頭視為 ETF，其餘未分類，可在表格內直接修改）。支援本站下載的英文欄名、UTF-8 與 Big5。股數以股為單位。持股僅保留於本次開啟，重新整理或關閉即清除，請下載備份。匯入資料不會由本站自動上傳；複製後貼至其他服務會交由該服務處理。Excel 可能移除代號前導 0，請以文字欄位匯入。</p>
+            <p className="text-[16px] text-[#8fa0b7]">匯入 CSV 必填：代號、名稱、股數、成本均價、現價；帳戶、因子可省略（沒有帳戶欄時，匯入預覽會要求指定帳戶；因子未填時 00 開頭視為 ETF，其餘未分類，可在表格內直接修改）。CSV 視為各帳戶目前的完整持股，更新既有部位請用「取代檔案中的帳戶」。支援本站下載的英文欄名、UTF-8 與 Big5。股數以股為單位。持股僅保留於本次開啟，重新整理或關閉即清除，請下載備份。匯入資料不會由本站自動上傳；複製後貼至其他服務會交由該服務處理。Excel 可能移除代號前導 0，請以文字欄位匯入。</p>
             <div className="rounded-[14px] border border-[#1e2632] bg-[#0b0f15] overflow-x-auto">
               <div className="min-w-[1392px]">
                 <div className="grid grid-cols-[90px_130px_110px_130px_130px_120px_120px_100px_90px_110px_130px] gap-0 text-[16px] font-black tracking-wide text-[#8fa0b7] px-[16px] py-[12px] border-b border-[#1e2632] bg-[#10161f]">

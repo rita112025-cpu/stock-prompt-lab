@@ -78,3 +78,63 @@ export function decodeCsv(buffer: ArrayBuffer): string {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buffer); }
   catch { return new TextDecoder('big5', { fatal: true }).decode(buffer); }
 }
+
+// 匯入規則：CSV 視為各帳戶「目前的完整持股」，不是逐筆交易紀錄。
+export type ImportMode = 'add' | 'replace';
+export type FactorChange = { account: string; code: string; from: string; to: string };
+export type ImportPlan<T extends ImportedHolding> = { kept: T[]; added: ImportedHolding[]; errors: string[]; notes: string[]; accounts: string[]; dropped: T[]; factorChanges: FactorChange[] };
+
+const holdingKey = (h: { account: string; code: string }) => `${h.account}\u0000${h.code}`;
+const stripLeadingZeros = (code: string) => code.replace(/^0+(?=\d)/, '');
+
+/** 檔案內同帳戶同代號的多列先合併：股數相加，成本按股數加權，其餘欄位取最後一列。 */
+export function mergeDuplicateRows(rows: ImportedHolding[]): { rows: ImportedHolding[]; notes: string[] } {
+  const merged = new Map<string, ImportedHolding>();
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = holdingKey(row);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const previous = merged.get(key);
+    if (!previous) { merged.set(key, { ...row }); continue; }
+    const total = previous.shares + row.shares;
+    const weighted = total > 0 ? (previous.shares * previous.costAvg + row.shares * row.costAvg) / total : row.costAvg;
+    merged.set(key, { ...row, shares: total, costAvg: weighted });
+  }
+  const notes = [...counts].filter(([, n]) => n > 1).map(([key, n]) => {
+    const h = merged.get(key)!;
+    return `${h.account} ${h.code} 在檔案中有 ${n} 列，已合併為 ${h.shares} 股，成本按股數加權。`;
+  });
+  return { rows: [...merged.values()], notes };
+}
+
+/**
+ * replace：只清空檔案中出現的帳戶，再放入檔案內容；其他帳戶不動。
+ * add：只允許新增尚未存在的「帳戶＋代號」，有重複就整批阻止。
+ * 有錯誤時不做任何變更（kept 為原持股、added 為空）。
+ */
+export function planImport<T extends ImportedHolding>(existing: T[], incoming: ImportedHolding[], mode: ImportMode): ImportPlan<T> {
+  const errors: string[] = [];
+  const missing = incoming.filter(r => !r.account.trim()).length;
+  if (missing) errors.push(`有 ${missing} 列沒有帳戶，請先指定帳戶。`);
+  const { rows, notes } = mergeDuplicateRows(incoming);
+  for (const row of rows) {
+    const twin = existing.find(h => h.account === row.account && h.code !== row.code && stripLeadingZeros(h.code) === stripLeadingZeros(row.code));
+    if (twin) errors.push(`${row.account} 的代號「${row.code}」和現有的「${twin.code}」只差開頭的 0，可能被 Excel 刪掉了前導 0。請修正 CSV 後再匯入。`);
+  }
+  if (mode === 'add') {
+    const existingKeys = new Set(existing.map(holdingKey));
+    const conflicts = rows.filter(r => existingKeys.has(holdingKey(r)));
+    if (conflicts.length) errors.push(`已有相同帳戶與代號的持股：${conflicts.map(r => `${r.account} ${r.code}`).join('、')}。更新既有部位請改用「取代」。`);
+  }
+  const accounts = [...new Set(rows.map(r => r.account))];
+  if (errors.length) return { kept: existing, added: [], errors, notes, accounts, dropped: [], factorChanges: [] };
+  if (mode === 'add') return { kept: existing, added: rows, errors, notes, accounts, dropped: [], factorChanges: [] };
+  const csvByKey = new Map(rows.map(r => [holdingKey(r), r]));
+  const replaced = existing.filter(h => accounts.includes(h.account));
+  const dropped = replaced.filter(h => !csvByKey.has(holdingKey(h)));
+  const factorChanges = replaced.flatMap(h => {
+    const next = csvByKey.get(holdingKey(h));
+    return next && next.factor !== h.factor ? [{ account: h.account, code: h.code, from: h.factor, to: next.factor }] : [];
+  });
+  return { kept: existing.filter(h => !accounts.includes(h.account)), added: rows, errors, notes, accounts, dropped, factorChanges };
+}

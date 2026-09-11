@@ -24,7 +24,7 @@ const fixture = encodeCsv([
 async function importCsv(page: Page, buffer = Buffer.from(fixture)) {
   await page.getByLabel('選擇持股 CSV').setInputFiles({ name: 'fixture.csv', mimeType: 'text/csv', buffer });
   await expect(page.getByRole('heading', { name: '匯入預覽：2 筆持股' })).toBeVisible();
-  await page.getByRole('button', { name: '取代全部持股', exact: true }).click();
+  await page.getByRole('button', { name: '取代檔案中的帳戶', exact: true }).click();
   await expect(page.getByLabel('0001 因子')).toBeVisible();
 }
 
@@ -155,3 +155,33 @@ for (const width of [390, 320]) {
     await page.screenshot({ path: testInfo.outputPath(`mobile-${width}.png`), fullPage: true });
   });
 }
+
+test('replace only updates accounts in the file, add blocks duplicates, and a missing account must be chosen', async ({ page }) => {
+  await importCsv(page);
+  const update = encodeCsv([['code', 'name', 'shares', 'costAvg', 'price', 'account'], ['0001', '測試甲', 30, 100, 130, '測試帳戶甲']]);
+  await page.getByLabel('選擇持股 CSV').setInputFiles({ name: 'update.csv', mimeType: 'text/csv', buffer: Buffer.from(update) });
+  await expect(page.getByRole('heading', { name: '匯入預覽：1 筆持股' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '加入現有持股', exact: true })).toBeDisabled();
+  await expect(page.getByText('已有相同帳戶與代號的持股', { exact: false })).toBeVisible();
+  await expect(page.getByText('因子會被 CSV 覆蓋', { exact: false })).toContainText('測試帳戶甲 0001：測試因子 → ETF');
+  await page.getByRole('button', { name: '取代檔案中的帳戶', exact: true }).click();
+  await expect(page.getByLabel('9999 因子')).toBeVisible();
+  await expect(page.locator('footer')).toContainText('總市值 4,700');
+
+  const noAccount = encodeCsv([['code', 'name', 'shares', 'costAvg', 'price'], ['9998', '測試丙', 5, 10, 10]]);
+  await page.getByLabel('選擇持股 CSV').setInputFiles({ name: 'no-account.csv', mimeType: 'text/csv', buffer: Buffer.from(noAccount) });
+  await expect(page.getByRole('button', { name: '加入現有持股', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '取代檔案中的帳戶', exact: true })).toBeDisabled();
+  await page.getByLabel('匯入帳戶').fill('測試帳戶乙');
+  await page.getByRole('button', { name: '加入現有持股', exact: true }).click();
+  await expect(page.getByLabel('9998 因子')).toBeVisible();
+  await expect(page.locator('footer')).toContainText('總市值 4,750');
+
+  const partial = encodeCsv([['code', 'name', 'shares', 'costAvg', 'price', 'account'], ['9997', '測試丁', 1, 1, 1, '測試帳戶乙']]);
+  await page.getByLabel('選擇持股 CSV').setInputFiles({ name: 'partial.csv', mimeType: 'text/csv', buffer: Buffer.from(partial) });
+  const dropped = page.getByText('取代後會被移除', { exact: false });
+  await expect(dropped).toContainText('測試帳戶乙 9999');
+  await expect(dropped).toContainText('測試帳戶乙 9998');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(page.locator('footer')).toContainText('總市值 4,750');
+});
