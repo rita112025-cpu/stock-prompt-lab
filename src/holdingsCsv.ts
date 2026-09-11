@@ -117,6 +117,10 @@ export function planImport<T extends ImportedHolding>(existing: T[], incoming: I
   const missing = incoming.filter(r => !r.account.trim()).length;
   if (missing) errors.push(`有 ${missing} 列沒有帳戶，請先指定帳戶。`);
   const { rows, notes } = mergeDuplicateRows(incoming);
+  rows.forEach((row, i) => {
+    const twin = rows.slice(0, i).find(r => r.account === row.account && r.code !== row.code && stripLeadingZeros(r.code) === stripLeadingZeros(row.code));
+    if (twin) errors.push(`檔案中 ${row.account} 的代號「${twin.code}」和「${row.code}」只差開頭的 0，無法判斷是否為同一檔。請修正 CSV 後再匯入。`);
+  });
   for (const row of rows) {
     const twin = existing.find(h => h.account === row.account && h.code !== row.code && stripLeadingZeros(h.code) === stripLeadingZeros(row.code));
     if (twin) errors.push(`${row.account} 的代號「${row.code}」和現有的「${twin.code}」只差開頭的 0，可能被 Excel 刪掉了前導 0。請修正 CSV 後再匯入。`);

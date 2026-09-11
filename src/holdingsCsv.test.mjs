@@ -110,3 +110,13 @@ test('codes that differ only by leading zeros are blocked instead of guessed', (
   }
   assert.deepEqual(planImport(existing, [lot('帳戶丙', '1', 1, 1)], 'add').errors.filter(e => /前導 0/.test(e)), []);
 });
+
+test('codes inside one file that differ only by leading zeros are blocked in both modes', () => {
+  for (const mode of ['add', 'replace']) {
+    const plan = planImport([], [lot('帳戶丙', '0001', 1, 1), lot('帳戶丙', '1', 1, 1)], mode);
+    assert.equal(plan.errors.length, 1);
+    assert.match(plan.errors[0], /帳戶丙 的代號「0001」和「1」只差開頭的 0/);
+    assert.deepEqual(plan.added, []);
+  }
+  assert.deepEqual(planImport([], [lot('帳戶丙', '0001', 1, 1), lot('帳戶丁', '1', 1, 1)], 'add').errors, []);
+});
