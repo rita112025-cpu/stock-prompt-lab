@@ -27,7 +27,7 @@ npm run test:e2e
 npm run dev
 ```
 
-依終端機顯示的本機網址開啟網站。正式建置的預覽可執行 `npm run preview`，路徑為 `/stock-prompt-workbench/`。
+依終端機顯示的本機網址開啟網站。正式建置的預覽可執行 `npm run preview`，路徑為 `/stock-prompt-lab/`。
 若 npm ci 失敗，先確認能連線 npm 套件來源；不要拿舊 dist 當作修正版部署。
 
 ### 瀏覽器回歸測試

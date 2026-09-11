@@ -8,7 +8,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: [['list'], ['html', { outputFolder: 'screenshots/playwright-report', open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:4173/stock-prompt-workbench/',
+    baseURL: 'http://127.0.0.1:4173/stock-prompt-lab/',
     channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     viewport: { width: 1440, height: 1000 },
     timezoneId: 'Asia/Taipei',
@@ -17,7 +17,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173/stock-prompt-workbench/',
+    url: 'http://127.0.0.1:4173/stock-prompt-lab/',
     reuseExistingServer: false,
   },
 });
