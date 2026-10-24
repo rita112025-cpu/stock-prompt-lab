@@ -13,6 +13,9 @@ CSV 必填欄位：代號、名稱、股數、成本均價、現價；帳戶、�
 所有金額須使用同一幣別。價格為使用者輸入，分析日期不等於行情日期。損益按股數與均價估算，未另計手續費、稅、股息及已實現損益。因子分類以 CSV 或手動輸入為準，網站不內建任何個股對照表，也未計算 ETF 穿透曝險。
 複製後貼至其他 AI 服務的資料，會由接收服務處理，請自行確認貼上的資訊範圍。
 
+## Skill 統計
+作者本機 `~/.claude/skills` 目前收錄 <!-- skill-count:total -->38<!-- /skill-count:total --> 個 skill，其中 <!-- skill-count:manual -->1<!-- /skill-count:manual --> 個需手動啟用。更新數字：`node scripts/sync-skill-count.js`（加 `--dry-run` 只預覽不寫入）。
+
 ## 本機執行（Windows／macOS／Linux）
 先安裝 Node.js 24（含 npm），再於專案資料夾開啟終端機：
 
